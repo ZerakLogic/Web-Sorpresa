@@ -23,6 +23,16 @@
             touch-action: manipulation;
         }
 
+        canvas#confetti {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+
         h1 {
             font-size: 1.6rem;
             margin-bottom: 2.5rem;
@@ -31,12 +41,22 @@
             line-height: 1.4;
             color: #f1f1f8;
             animation: fadeIn 0.8s ease both;
+            position: relative;
+            z-index: 2;
+        }
+
+        .emoji-flotante {
+            font-size: 3.2rem;
+            display: block;
+            margin-bottom: 0.5rem;
+            animation: flotar 2.4s ease-in-out infinite;
         }
 
         .botones {
             position: relative;
             width: 100%;
             height: 220px;
+            z-index: 2;
         }
 
         button {
@@ -78,6 +98,48 @@
             z-index: 1;
         }
 
+        #btn-compartir {
+            background: linear-gradient(135deg, #25d366, #1ea952);
+            color: white;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 1.5rem auto 0;
+            opacity: 0;
+            transform: translateY(10px) scale(0.9);
+            pointer-events: none;
+            transition: transform 0.3s cubic-bezier(.34,1.56,.64,1), opacity 0.3s ease, box-shadow 0.25s ease;
+        }
+        #btn-compartir.visible {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+            pointer-events: auto;
+        }
+        #btn-compartir:hover {
+            transform: scale(1.05);
+            box-shadow: 0 8px 25px rgba(37,211,102,0.5);
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: rgba(20,20,35,0.95);
+            color: #fff;
+            padding: 12px 22px;
+            border-radius: 30px;
+            font-size: 0.95rem;
+            opacity: 0;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            z-index: 20;
+            box-shadow: 0 4px 18px rgba(0,0,0,0.4);
+        }
+        .toast.visible {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(-10px); }
             to { opacity: 1; transform: translateY(0); }
@@ -88,12 +150,19 @@
             100% { transform: scale(1); opacity: 1; }
         }
 
+        @keyframes flotar {
+            0%, 100% { transform: translateY(0) rotate(-4deg); }
+            50% { transform: translateY(-12px) rotate(4deg); }
+        }
+
         .celebracion {
             animation: popIn 0.5s cubic-bezier(.34,1.56,.64,1) both;
         }
     </style>
 </head>
 <body>
+
+    <canvas id="confetti"></canvas>
 
     <h1 id="mensaje">¿Te gustaría salir a tomar algo conmigo esta semana? ☕</h1>
 
@@ -102,9 +171,15 @@
         <button id="btn-no">No creo</button>
     </div>
 
+    <button id="btn-compartir">🔗 Compartir respuesta</button>
+
+    <div class="toast" id="toast">¡Enlace copiado!</div>
+
     <script>
         const btnNo = document.getElementById('btn-no');
+        const btnCompartir = document.getElementById('btn-compartir');
         const mensaje = document.getElementById('mensaje');
+        const toast = document.getElementById('toast');
         let moviendo = false;
 
         function moverBoton() {
@@ -128,8 +203,6 @@
             btnNo.style.margin = '0';
             btnNo.style.transform = 'none';
 
-            // Libera el "lock" después de que termine la transición,
-            // para permitir el siguiente intento de toque/click sin duplicar eventos.
             setTimeout(() => { moviendo = false; }, 120);
         }
 
@@ -150,9 +223,113 @@
         });
 
         function aceptar() {
-            mensaje.innerHTML = "¡Sabía que dirías que sí! 🚀<br>Yo invito.";
+            mensaje.innerHTML = '<span class="emoji-flotante">🎉</span>¡Sabía que dirías que sí! 🚀<br>Yo invito.';
             mensaje.classList.add('celebracion');
             document.querySelector('.botones').style.display = 'none';
+
+            btnCompartir.classList.add('visible');
+
+            lanzarConfeti();
+        }
+
+        // ---------- Botón compartir ----------
+        btnCompartir.addEventListener('click', async () => {
+            const texto = '¡Dije que sí! 🎉☕';
+            const url = window.location.href;
+
+            if (navigator.share) {
+                try {
+                    await navigator.share({ title: texto, text: texto, url });
+                    return;
+                } catch (err) {
+                    // Usuario canceló el share o falló: continuamos al fallback
+                }
+            }
+
+            try {
+                await navigator.clipboard.writeText(`${texto} ${url}`);
+                mostrarToast('¡Enlace copiado al portapapeles!');
+            } catch (err) {
+                mostrarToast('No se pudo copiar el enlace 😕');
+            }
+        });
+
+        function mostrarToast(msg) {
+            toast.textContent = msg;
+            toast.classList.add('visible');
+            setTimeout(() => toast.classList.remove('visible'), 2500);
+        }
+
+        // ---------- Confeti con canvas (ligero, sin dependencias externas) ----------
+        const canvas = document.getElementById('confetti');
+        const ctx = canvas.getContext('2d');
+        let piezas = [];
+        let animando = false;
+
+        function ajustarCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', ajustarCanvas);
+        ajustarCanvas();
+
+        const colores = ['#e94560', '#ff5277', '#533483', '#6a4fc4', '#25d366', '#ffd166', '#06d6a0'];
+
+        function lanzarConfeti() {
+            piezas = [];
+            const cantidad = 140;
+            for (let i = 0; i < cantidad; i++) {
+                piezas.push({
+                    x: Math.random() * canvas.width,
+                    y: -20 - Math.random() * canvas.height * 0.3,
+                    tam: 6 + Math.random() * 6,
+                    color: colores[Math.floor(Math.random() * colores.length)],
+                    velY: 2 + Math.random() * 3,
+                    velX: -1.5 + Math.random() * 3,
+                    rot: Math.random() * 360,
+                    velRot: -6 + Math.random() * 12,
+                    forma: Math.random() > 0.5 ? 'rect' : 'circulo'
+                });
+            }
+            if (!animando) {
+                animando = true;
+                requestAnimationFrame(animarConfeti);
+            }
+            // Detiene la animación tras unos segundos para no gastar batería/CPU
+            setTimeout(() => { piezas = []; }, 4500);
+        }
+
+        function animarConfeti() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (piezas.length === 0) {
+                animando = false;
+                return;
+            }
+
+            piezas.forEach(p => {
+                p.x += p.velX;
+                p.y += p.velY;
+                p.rot += p.velRot;
+
+                ctx.save();
+                ctx.translate(p.x, p.y);
+                ctx.rotate(p.rot * Math.PI / 180);
+                ctx.fillStyle = p.color;
+
+                if (p.forma === 'rect') {
+                    ctx.fillRect(-p.tam / 2, -p.tam / 2, p.tam, p.tam * 0.6);
+                } else {
+                    ctx.beginPath();
+                    ctx.arc(0, 0, p.tam / 2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            });
+
+            piezas = piezas.filter(p => p.y < canvas.height + 30);
+
+            requestAnimationFrame(animarConfeti);
         }
     </script>
 </body>
